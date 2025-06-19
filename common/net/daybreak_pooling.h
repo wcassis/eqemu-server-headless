@@ -10,7 +10,7 @@
 #include "../eqemu_logsys.h"
 #include <uv.h>
 
-constexpr size_t UDP_BUFFER_SIZE = 512;
+constexpr size_t UDP_BUFFER_SIZE = 4096;  // Increased to handle larger packets
 
 struct EmbeddedContext {
 	size_t pool_index;

@@ -1,5 +1,7 @@
 #include "world.h"
 #include "../common/eqemu_logsys.h"
+#include <fmt/format.h>
+#include <iostream>
 
 WorldConnection::WorldConnection(const std::string &key, uint32_t dbid, const std::string &host)
 {
@@ -21,18 +23,18 @@ WorldConnection::~WorldConnection() {
 void WorldConnection::OnNewConnection(std::shared_ptr<EQ::Net::DaybreakConnection> connection)
 {
 	m_connection = connection;
-	Log.OutF(Logs::General, Logs::Headless_Client, "Connecting to world...");
+	std::cout << "Connecting to world...\n";
 }
 
 void WorldConnection::OnStatusChangeActive(std::shared_ptr<EQ::Net::DaybreakConnection> conn, EQ::Net::DbProtocolStatus from, EQ::Net::DbProtocolStatus to)
 {
 	if (to == EQ::Net::StatusConnected) {
-		Log.OutF(Logs::General, Logs::Headless_Client, "World connected.");
+		std::cout << "World connected.\n";
 		SendClientAuth();
 	}
 
 	if (to == EQ::Net::StatusDisconnected) {
-		Log.OutF(Logs::General, Logs::Headless_Client, "World connection lost, reconnecting.");
+		std::cout << "World connection lost, reconnecting.\n";
 		m_connection.reset();
 		m_connection_manager->Connect(m_host, 9000);
 	}
@@ -48,7 +50,7 @@ void WorldConnection::OnStatusChangeInactive(std::shared_ptr<EQ::Net::DaybreakCo
 void WorldConnection::OnPacketRecv(std::shared_ptr<EQ::Net::DaybreakConnection> conn, const EQ::Net::Packet &p)
 {
 	auto opcode = p.GetUInt16(0);
-	Log.OutF(Logs::General, Logs::Headless_Client, "Packet in:\n{0}", p.ToString());
+	std::cout << fmt::format("Packet in:\n{}", p.ToString());
 }
 
 void WorldConnection::Kill()

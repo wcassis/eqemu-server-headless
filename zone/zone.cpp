@@ -1456,6 +1456,7 @@ void Zone::AddAuth(ServerZoneIncomingClient_Struct* szic) {
 	zca->lsid = szic->lsid;
 	zca->tellsoff = szic->tellsoff;
 	strn0cpy(zca->charname, szic->charname, sizeof(zca->charname));
+	LogInfo("[DEBUG] AddAuth: Adding auth entry for character [{}] - charid [{}] accid [{}] wid [{}]", szic->charname, szic->charid, szic->accid, szic->wid);
 	strn0cpy(zca->lskey, szic->lskey, sizeof(zca->lskey));
 	zca->stale = false;
 	client_auth_list.Insert(zca);
@@ -1504,10 +1505,12 @@ void Zone::ResetAuth()
 bool Zone::GetAuth(uint32 iIP, const char* iCharName, uint32* oWID, uint32* oAccID, uint32* oCharID, int16* oStatus, char* oLSKey, bool* oTellsOff) {
 	LinkedListIterator<ZoneClientAuth_Struct*> iterator(client_auth_list);
 
+	LogInfo("[DEBUG] GetAuth: Looking for character [{}] in auth list", iCharName);
 	iterator.Reset();
 	while (iterator.MoreElements()) {
 		ZoneClientAuth_Struct* zca = iterator.GetData();
 		if (strcasecmp(zca->charname, iCharName) == 0) {
+				LogInfo("[DEBUG] GetAuth: Found auth entry for [{}] - charid [{}] accid [{}] wid [{}]", iCharName, zca->charid, zca->accid, zca->wid);
 				if(oWID)
 				*oWID = zca->wid;
 				if(oAccID)

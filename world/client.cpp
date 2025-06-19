@@ -247,11 +247,14 @@ void Client::SendCharInfo() {
 
 	seen_character_select = true;
 
+	LogInfo("[DEBUG] SendCharInfo: Sending character info for account_id [{}]", GetAccountID());
+
 	// Send OP_SendCharInfo
 	EQApplicationPacket *outapp = nullptr;
 	database.GetCharSelectInfo(GetAccountID(), &outapp, m_ClientVersionBit);
 
 	if (outapp) {
+		LogInfo("[DEBUG] SendCharInfo: Sending OP_SendCharInfo packet to client for account_id [{}]", GetAccountID());
 		QueuePacket(outapp);
 	}
 	else {
@@ -803,6 +806,8 @@ bool Client::HandleEnterWorldPacket(const EQApplicationPacket *app) {
 	auto ew = (EnterWorld_Struct *) app->pBuffer;
 	strn0cpy(char_name, ew->name, sizeof(char_name));
 
+	LogInfo("[DEBUG] HandleEnterWorldPacket: Player entering world with character name [{}] from account_id [{}]", char_name, account_id);
+
 	const auto& l = CharacterDataRepository::GetWhere(
 		database,
 		fmt::format(
@@ -831,6 +836,8 @@ bool Client::HandleEnterWorldPacket(const EQApplicationPacket *app) {
 
 	const auto& e = l.front();
 
+	LogInfo("[DEBUG] HandleEnterWorldPacket: Found character [{}] with id [{}] for account_id [{}]", e.name, e.id, e.account_id);
+
 	// Make sure this account owns this character
 	if (e.account_id != account_id) {
 		LogInfo(
@@ -846,6 +853,8 @@ bool Client::HandleEnterWorldPacket(const EQApplicationPacket *app) {
 	charid      = e.id;
 	zone_id     = e.zone_id;
 	instance_id = e.zone_instance;
+	
+	LogInfo("[DEBUG] HandleEnterWorldPacket: Setting charid to [{}], zone_id to [{}], instance_id to [{}]", charid, zone_id, instance_id);
 
 	// This can probably be moved outside and have another method return requested info (don't forget to remove the #include "../common/shareddb.h" above)
 	// (This is a literal translation of the original process..I don't see why it can't be changed to a single-target query over account iteration)
@@ -1397,6 +1406,8 @@ bool Client::ChecksumVerificationCRCBaseData(uint64 checksum)
 }
 
 void Client::EnterWorld(bool TryBootup) {
+	LogInfo("[DEBUG] EnterWorld: Called for character [{}] (id: {}) to zone_id [{}], instance_id [{}]", char_name, charid, zone_id, instance_id);
+
 	if (zone_id == 0)
 		return;
 
@@ -1421,11 +1432,13 @@ void Client::EnterWorld(bool TryBootup) {
 
 	const char *zone_name = ZoneName(zone_id, true);
 	if (zone_server) {
+		LogInfo("[DEBUG] EnterWorld: Found zone server for zone [{}] (id: {})", zone_name, zone_id);
 		if (false == enter_world_triggered) {
 			//Drop any clients we own in other zones.
 			zoneserver_list.DropClient(GetLSID(), zone_server);
 
 			// warn the zone we're coming
+			LogInfo("[DEBUG] EnterWorld: Sending IncomingClient notification for character [{}] (id: {}) to zone server", char_name, charid);
 			zone_server->IncomingClient(this);
 
 			//tell the server not to trigger this multiple times before we get a zone unavailable
@@ -1466,6 +1479,8 @@ void Client::EnterWorld(bool TryBootup) {
 	cle->SetChar(charid, char_name);
 	database.UpdateLiveChar(char_name, GetAccountID());
 
+	LogInfo("[DEBUG] EnterWorld: SetChar called with charid [{}], char_name [{}]", charid, char_name);
+
 	LogInfo(
 		"({}) [{}] [{}] (Zone ID [{}]: Instance ID: [{}]) ",
 		char_name,
@@ -1476,6 +1491,7 @@ void Client::EnterWorld(bool TryBootup) {
 	);
 
 	if (seen_character_select) {
+		LogInfo("[DEBUG] EnterWorld: Preparing ServerOP_AcceptWorldEntrance packet for character [{}] (id: {}), account_id [{}]", char_name, charid, GetAccountID());
 		auto pack = new ServerPacket;
 		pack->opcode = ServerOP_AcceptWorldEntrance;
 		pack->size = sizeof(WorldToZone_Struct);
@@ -1484,6 +1500,7 @@ void Client::EnterWorld(bool TryBootup) {
 		WorldToZone_Struct* wtz = (WorldToZone_Struct*) pack->pBuffer;
 		wtz->account_id = GetAccountID();
 		wtz->response = 0;
+		LogInfo("[DEBUG] EnterWorld: Sending ServerOP_AcceptWorldEntrance with account_id [{}] to zone server", wtz->account_id);
 		zone_server->SendPacket(pack);
 		delete pack;
 	}
@@ -1495,6 +1512,9 @@ void Client::EnterWorld(bool TryBootup) {
 
 void Client::Clearance(int8 response)
 {
+	LogInfo("[DEBUG] Clearance: Called for character [{}] (id: {}) with response [{}], zone_id [{}], instance_id [{}]", 
+		char_name, charid, response, zone_id, instance_id);
+
 	ZoneServer* zs = nullptr;
 	if(instance_id > 0)
 	{
@@ -1577,11 +1597,14 @@ void Client::Clearance(int8 response)
 	strcpy(zsi->ip, zs_addr.c_str());
 	zsi->port =zs->GetCPort();
 	LogInfo("Sending client to zone [{}] ([{}]:[{}]) at [{}]:[{}]", zonename, zone_id, instance_id, zsi->ip, zsi->port);
+	LogInfo("[DEBUG] Clearance: Sending OP_ZoneServerInfo for character [{}] (id: {}), account_id [{}]", char_name, charid, GetAccountID());
 	QueuePacket(outapp);
 	safe_delete(outapp);
 
-	if (cle)
+	if (cle) {
+		LogInfo("[DEBUG] Clearance: Setting CLE status to Zoning for character [{}] (id: {})", char_name, charid);
 		cle->SetOnline(CLE_Status::Zoning);
+	}
 }
 
 void Client::TellClientZoneUnavailable() {

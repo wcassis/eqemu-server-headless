@@ -635,6 +635,7 @@ void WorldServer::HandleMessage(uint16 opcode, const EQ::Net::Packet &p)
 			break;
 		}
 		ServerZoneIncomingClient_Struct* szic = (ServerZoneIncomingClient_Struct*)pack->pBuffer;
+		LogInfo("[DEBUG] ServerOP_ZoneIncClient: Received auth data from world - character [{}] charid [{}] accid [{}] wid [{}]", szic->charname, szic->charid, szic->accid, szic->wid);
 		if (is_zone_loaded) {
 			SetZoneData(zone->GetZoneID(), zone->GetInstanceID());
 

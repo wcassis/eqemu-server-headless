@@ -24,7 +24,7 @@
 #include "../common/repositories/bot_data_repository.h"
 #include "../common/repositories/character_data_repository.h"
 
-#include "../common/data_bucket.h"
+#include "data_bucket.h"
 #include "quest_parser_collection.h"
 #include "string_ids.h"
 #include "worldserver.h"
@@ -1292,6 +1292,9 @@ void Mob::FillSpawnStruct(NewSpawn_Struct* ns, Mob* ForWho)
 	ns->spawn.y           = FloatToEQ19(m_Position.y); //((int32)y_pos)<<3;
 	ns->spawn.z           = FloatToEQ19(m_Position.z); //((int32)z_pos)<<3;
 	ns->spawn.spawnId     = GetID();
+	if (IsClient()) {
+		LogInfo("[DEBUG] FillSpawnStruct: Setting spawnId [{}] for client [{}]", ns->spawn.spawnId, GetName());
+	}
 	ns->spawn.curHp       = static_cast<uint8>(GetHPRatio());
 	ns->spawn.max_hp      = 100; // this field needs a better name
 	ns->spawn.race        = (use_model) ? use_model : race;
@@ -1746,6 +1749,14 @@ void Mob::MakeSpawnUpdate(PlayerPositionUpdateServer_Struct* spu) {
 		spu->animation = pRunAnimSpeed;//animation;
 
 	spu->delta_heading = FloatToEQ10(m_Delta.w);
+	
+	// DEBUG: Log the values being set in the update packet
+	float heading_degrees = m_Position.w * 360.0f / 512.0f;
+	unsigned int raw_heading = spu->heading;
+	LogInfo("[DEBUG] MakeSpawnUpdate for {} (ID: {}): pos=({:.2f},{:.2f},{:.2f}) deltas=({:.2f},{:.2f},{:.2f}) heading={:.2f} ({:.2f}°) raw_heading={} anim={}", 
+		GetName(), GetID(), m_Position.x, m_Position.y, m_Position.z, 
+		m_Delta.x, m_Delta.y, m_Delta.z, m_Position.w, heading_degrees,
+		raw_heading, static_cast<int>(spu->animation));
 }
 
 void Mob::SendStatsWindow(Client* c, bool use_window)
@@ -8771,24 +8782,4 @@ bool Mob::IsGuildmaster() const {
 		default:
 			return false;
 	}
-}
-
-bool Mob::LoadDataBucketsCache()
-{
-	const uint32 id = GetMobTypeIdentifier();
-
-	if (!id) {
-		return false;
-	}
-
-	if (IsBot()) {
-		DataBucket::BulkLoadEntitiesToCache(DataBucketLoadType::Bot, {id});
-	}
-	else if (IsClient()) {
-		uint32 account_id = CastToClient()->AccountID();
-		DataBucket::BulkLoadEntitiesToCache(DataBucketLoadType::Account, {account_id});
-		DataBucket::BulkLoadEntitiesToCache(DataBucketLoadType::Client, {id});
-	}
-
-	return true;
 }

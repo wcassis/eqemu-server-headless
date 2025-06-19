@@ -65,6 +65,7 @@ void WorldDatabase::GetCharSelectInfo(uint32 account_id, EQApplicationPacket **o
 
 	size_t character_count = characters.size();
 	if (characters.empty()) {
+		LogInfo("[DEBUG] GetCharSelectInfo: No characters found for account_id [{}]", account_id);
 		*out_app = new EQApplicationPacket(OP_SendCharInfo, sizeof(CharacterSelect_Struct));
 		auto *cs = (CharacterSelect_Struct *) (*out_app)->pBuffer;
 		cs->CharCount  = 0;
@@ -72,9 +73,11 @@ void WorldDatabase::GetCharSelectInfo(uint32 account_id, EQApplicationPacket **o
 		return;
 	}
 
+	LogInfo("[DEBUG] GetCharSelectInfo: Found [{}] characters for account_id [{}]", character_count, account_id);
 	std::vector<uint32_t> character_ids;
 	for (auto &e: characters) {
 		character_ids.push_back(e.id);
+		LogInfo("[DEBUG] GetCharSelectInfo: Character [{}] (id: {}) loaded for account_id [{}]", e.name, e.id, account_id);
 	}
 
 	const auto& inventories = InventoryRepository::GetWhere(

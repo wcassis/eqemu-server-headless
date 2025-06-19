@@ -117,6 +117,13 @@ void EQ::Net::DaybreakConnectionManager::Process()
 {
 	auto now = Clock::now();
 	auto iter = m_connections.begin();
+	
+	// Debug: Log connection processing
+	static int mgr_process_count = 0;
+	if (++mgr_process_count % 300 == 0 && !m_connections.empty()) {
+		//printf("[DaybreakConnectionManager::Process] Processing %zu connections\n", m_connections.size());
+	}
+	
 	while (iter != m_connections.end()) {
 		auto connection = iter->second;
 		auto status = connection->m_status;
@@ -219,6 +226,8 @@ void EQ::Net::DaybreakConnectionManager::ProcessResend()
 
 void EQ::Net::DaybreakConnectionManager::ProcessPacket(const std::string &endpoint, int port, const char *data, size_t size)
 {
+	//printf("[DaybreakConnectionManager::ProcessPacket] Received packet from %s:%d, size=%zu\n", endpoint.c_str(), port, size);
+
 	if (m_options.simulated_in_packet_loss && m_options.simulated_in_packet_loss >= m_rand.Int(0, 100)) {
 		return;
 	}
@@ -409,6 +418,14 @@ void EQ::Net::DaybreakConnection::Process()
 	try {
 		auto now = Clock::now();
 		auto time_since_hold = (size_t)std::chrono::duration_cast<std::chrono::milliseconds>(now - m_hold_time).count();
+		
+		// Debug: Log when we check for flush
+		static int process_count = 0;
+		if (++process_count % 100 == 0 && !m_buffered_packets.empty()) {
+			//printf("[DaybreakConnection::Process] time_since_hold=%zu ms, hold_length_ms=%zu ms, buffer has %zu packets\n",
+			//	time_since_hold, m_owner->m_options.hold_length_ms, m_buffered_packets.size());
+		}
+		
 		if (time_since_hold >= m_owner->m_options.hold_length_ms) {
 			FlushBuffer();
 		}
@@ -430,6 +447,12 @@ void EQ::Net::DaybreakConnection::ProcessPacket(Packet &p)
 
 	if (p.Length() < 1) {
 		return;
+	}
+
+	// Debug: Log all incoming packets
+	if (p.Length() >= 2) {
+		//printf("[DaybreakConnection::ProcessPacket] Received packet: first_byte=0x%02x, opcode=0x%02x, length=%zu\n", 
+		//	p.GetInt8(0), p.GetInt8(1), p.Length());
 	}
 
 	auto opcode = p.GetInt8(1);
@@ -506,6 +529,17 @@ void EQ::Net::DaybreakConnection::ProcessQueue()
 {
 	for (int i = 0; i < 4; ++i) {
 		auto stream = &m_streams[i];
+		if (!stream->packet_queue.empty()) {
+			//printf("[DaybreakConnection::ProcessQueue] Stream %d: checking queue (size=%zu), looking for seq=%u\n", 
+			//	i, stream->packet_queue.size(), stream->sequence_in);
+			// Print first few queued sequences for debugging
+			int count = 0;
+			for (auto& kv : stream->packet_queue) {
+				if (count++ < 5) {
+					//printf("  - Queued seq: %u\n", kv.first);
+				}
+			}
+		}
 		for (;;) {
 
 			auto iter = stream->packet_queue.find(stream->sequence_in);
@@ -513,6 +547,7 @@ void EQ::Net::DaybreakConnection::ProcessQueue()
 				break;
 			}
 
+			//printf("[DaybreakConnection::ProcessQueue] Found queued packet seq=%u, processing\n", stream->sequence_in);
 			auto packet = iter->second;
 			stream->packet_queue.erase(iter);
 			ProcessDecodedPacket(*packet);
@@ -526,9 +561,12 @@ void EQ::Net::DaybreakConnection::RemoveFromQueue(int stream, uint16_t seq)
 	auto s = &m_streams[stream];
 	auto iter = s->packet_queue.find(seq);
 	if (iter != s->packet_queue.end()) {
+		//printf("[DaybreakConnection::RemoveFromQueue] Removing packet seq=%u from stream %d queue\n", seq, stream);
 		auto packet = iter->second;
 		s->packet_queue.erase(iter);
 		delete packet;
+	} else {
+		//printf("[DaybreakConnection::RemoveFromQueue] Packet seq=%u NOT found in stream %d queue\n", seq, stream);
 	}
 }
 
@@ -541,11 +579,21 @@ void EQ::Net::DaybreakConnection::AddToQueue(int stream, uint16_t seq, const Pac
 		out->PutPacket(0, p);
 
 		s->packet_queue.emplace(std::make_pair(seq, out));
+		//printf("[DaybreakConnection::AddToQueue] Added packet seq=%u to stream %d queue (queue_size=%zu)\n", 
+		//	seq, stream, s->packet_queue.size());
+	} else {
+		//printf("[DaybreakConnection::AddToQueue] Packet seq=%u already in stream %d queue, ignoring\n", seq, stream);
 	}
 }
 
 void EQ::Net::DaybreakConnection::ProcessDecodedPacket(const Packet &p)
 {
+	// Debug: Log decoded packets
+	if (p.Length() >= 2) {
+		//printf("[DaybreakConnection::ProcessDecodedPacket] Processing decoded packet: first_byte=0x%02x, opcode=0x%02x, length=%zu\n", 
+		//	p.GetInt8(0), p.GetInt8(1), p.Length());
+	}
+
 	if (p.GetInt8(0) == 0) {
 		if (p.Length() < 2) {
 			return;
@@ -558,8 +606,11 @@ void EQ::Net::DaybreakConnection::ProcessDecodedPacket(const Packet &p)
 					return;
 				}
 
+				//printf("[DaybreakConnection::ProcessDecodedPacket] OP_Combined packet, processing sub-packets\n");
+
 				char *current = (char*)p.Data() + 2;
 				char *end = (char*)p.Data() + p.Length();
+				int subpacket_count = 0;
 				while (current < end) {
 					uint8_t subpacket_length = *(uint8_t*)current;
 					current += 1;
@@ -568,6 +619,8 @@ void EQ::Net::DaybreakConnection::ProcessDecodedPacket(const Packet &p)
 						return;
 					}
 
+					//printf("[DaybreakConnection::ProcessDecodedPacket] Processing sub-packet %d, length=%d\n", 
+					//	++subpacket_count, subpacket_length);
 					ProcessDecodedPacket(StaticPacket(current, subpacket_length));
 					current += subpacket_length;
 				}
@@ -581,8 +634,11 @@ void EQ::Net::DaybreakConnection::ProcessDecodedPacket(const Packet &p)
 					return;
 				}
 
+				//printf("[DaybreakConnection::ProcessDecodedPacket] OP_AppCombined packet, size=%zu\n", p.Length());
+
 				uint8_t *current = (uint8_t*)p.Data() + 2;
 				uint8_t *end = (uint8_t*)p.Data() + p.Length();
+				int subpacket_count = 0;
 
 				while (current < end) {
 					uint32_t subpacket_length = 0;
@@ -618,6 +674,8 @@ void EQ::Net::DaybreakConnection::ProcessDecodedPacket(const Packet &p)
 						current += 1;
 					}
 
+					//printf("[DaybreakConnection::ProcessDecodedPacket] OP_AppCombined sub-packet %d, length=%u\n", 
+					//	++subpacket_count, subpacket_length);
 					ProcessDecodedPacket(StaticPacket(current, subpacket_length));
 					current += subpacket_length;
 				}
@@ -655,8 +713,12 @@ void EQ::Net::DaybreakConnection::ProcessDecodedPacket(const Packet &p)
 
 			case OP_SessionResponse:
 			{
+				//printf("[DaybreakConnection::ProcessDecodedPacket] Received OP_SessionResponse\n");
 				if (m_status == StatusConnecting) {
 					auto reply = p.GetSerialize<DaybreakConnectReply>(0);
+
+					//printf("[DaybreakConnection::ProcessDecodedPacket] Session response: connect_code=%u (expected %u)\n", 
+					//	reply.connect_code, m_connect_code);
 
 					if (m_connect_code == reply.connect_code) {
 						m_encode_key = reply.encode_key;
@@ -665,6 +727,9 @@ void EQ::Net::DaybreakConnection::ProcessDecodedPacket(const Packet &p)
 						m_encode_passes[1] = (DaybreakEncodeType)reply.encode_pass2;
 						m_max_packet_size = reply.max_packet_size;
 						ChangeStatus(StatusConnected);
+
+						//printf("[DaybreakConnection::ProcessDecodedPacket] Session established! encode_key=%u, crc_bytes=%u\n",
+						//	HostToNetwork(m_encode_key), m_crc_bytes);
 
 						LogNetClient(
 							"[OP_SessionResponse] Session [{}] refresh with encode key [{}]",
@@ -691,15 +756,21 @@ void EQ::Net::DaybreakConnection::ProcessDecodedPacket(const Packet &p)
 				auto stream_id = header.opcode - OP_Packet;
 				auto stream = &m_streams[stream_id];
 
+				//printf("[DaybreakConnection::ProcessDecodedPacket] OP_Packet%d: stream_id=%d, sequence=%d\n", 
+				//	stream_id + 1, stream_id, sequence);
+
 				auto order = CompareSequence(stream->sequence_in, sequence);
 				if (order == SequenceFuture) {
+					//printf("[DaybreakConnection::ProcessDecodedPacket] Future packet, queuing\n");
 					SendOutOfOrderAck(stream_id, sequence);
 					AddToQueue(stream_id, sequence, p);
 				}
 				else if (order == SequencePast) {
+					//printf("[DaybreakConnection::ProcessDecodedPacket] Past packet, acking\n");
 					SendAck(stream_id, stream->sequence_in - 1);
 				}
 				else {
+					//printf("[DaybreakConnection::ProcessDecodedPacket] Current packet, processing payload\n");
 					RemoveFromQueue(stream_id, sequence);
 					SendAck(stream_id, stream->sequence_in);
 					stream->sequence_in++;
@@ -715,44 +786,85 @@ void EQ::Net::DaybreakConnection::ProcessDecodedPacket(const Packet &p)
 			case OP_Fragment3:
 			case OP_Fragment4:
 			{
+				//printf("[DaybreakConnection::ProcessDecodedPacket] Processing fragment opcode=0x%02x\n", p.GetInt8(1));
 				auto header = p.GetSerialize<DaybreakReliableHeader>(0);
 				auto sequence = NetworkToHost(header.sequence);
 				auto stream_id = header.opcode - OP_Fragment;
 				auto stream = &m_streams[stream_id];
+				//printf("[DaybreakConnection::ProcessDecodedPacket] Fragment seq=%u, stream_id=%u, expected_seq=%u\n", sequence, stream_id, stream->sequence_in);
 
 				auto order = CompareSequence(stream->sequence_in, sequence);
 
 				if (order == SequenceFuture) {
+					//printf("[DaybreakConnection::ProcessDecodedPacket] Fragment FUTURE: seq=%u (expected=%u), queueing\n", sequence, stream->sequence_in);
 					SendOutOfOrderAck(stream_id, sequence);
 					AddToQueue(stream_id, sequence, p);
 				}
 				else if (order == SequencePast) {
+					//printf("[DaybreakConnection::ProcessDecodedPacket] Fragment PAST: seq=%u (expected=%u), acking\n", sequence, stream->sequence_in);
 					SendAck(stream_id, stream->sequence_in - 1);
 				}
 				else {
+					//printf("[DaybreakConnection::ProcessDecodedPacket] Fragment CURRENT: seq=%u, removing from queue\n", sequence);
 					RemoveFromQueue(stream_id, sequence);
 					SendAck(stream_id, stream->sequence_in);
+					//printf("[DaybreakConnection::ProcessDecodedPacket] Incrementing sequence_in from %u to %u\n", 
+					//	stream->sequence_in, stream->sequence_in + 1);
 					stream->sequence_in++;
 
 					if (stream->fragment_total_bytes == 0) {
 						auto fragheader = p.GetSerialize<DaybreakReliableFragmentHeader>(0);
 						stream->fragment_total_bytes = NetworkToHost(fragheader.total_size);
 						stream->fragment_current_bytes = 0;
-						stream->fragment_packet.Reserve(stream->fragment_total_bytes);
-						stream->fragment_packet.PutData(
-							stream->fragment_current_bytes,
-							(char*)p.Data() + DaybreakReliableFragmentHeader::size(), p.Length() - DaybreakReliableFragmentHeader::size());
+						
+						// Clear and resize the fragment packet to exact size needed
+						stream->fragment_packet.Clear();
+						stream->fragment_packet.Resize(stream->fragment_total_bytes);
+						
+						//printf("[DaybreakConnection::ProcessDecodedPacket] Starting new fragment, total_bytes=%u\n", stream->fragment_total_bytes);
+						
+						// Bounds check before copying data
+						size_t data_size = p.Length() - DaybreakReliableFragmentHeader::size();
+						if (stream->fragment_current_bytes + data_size > stream->fragment_total_bytes) {
+							//printf("[DaybreakConnection::ProcessDecodedPacket] ERROR: Fragment data would overflow! current=%u, adding=%zu, total=%u\n",
+							//	stream->fragment_current_bytes, data_size, stream->fragment_total_bytes);
+							stream->fragment_packet.Clear();
+							stream->fragment_total_bytes = 0;
+							stream->fragment_current_bytes = 0;
+							break;
+						}
+						
+						memcpy((char*)stream->fragment_packet.Data() + stream->fragment_current_bytes,
+							(char*)p.Data() + DaybreakReliableFragmentHeader::size(), data_size);
 
-						stream->fragment_current_bytes += (uint32_t)(p.Length() - DaybreakReliableFragmentHeader::size());
+						stream->fragment_current_bytes += (uint32_t)data_size;
 					}
 					else {
-						stream->fragment_packet.PutData(
-							stream->fragment_current_bytes,
-							(char*)p.Data() + DaybreakReliableHeader::size(), p.Length() - DaybreakReliableHeader::size());
+						// Bounds check before copying data
+						size_t data_size = p.Length() - DaybreakReliableHeader::size();
+						if (stream->fragment_current_bytes + data_size > stream->fragment_total_bytes) {
+							//printf("[DaybreakConnection::ProcessDecodedPacket] ERROR: Fragment data would overflow! current=%u, adding=%zu, total=%u\n",
+							//	stream->fragment_current_bytes, data_size, stream->fragment_total_bytes);
+							stream->fragment_packet.Clear();
+							stream->fragment_total_bytes = 0;
+							stream->fragment_current_bytes = 0;
+							break;
+						}
+						
+						memcpy((char*)stream->fragment_packet.Data() + stream->fragment_current_bytes,
+							(char*)p.Data() + DaybreakReliableHeader::size(), data_size);
 
-						stream->fragment_current_bytes += (uint32_t)(p.Length() - DaybreakReliableHeader::size());
+						stream->fragment_current_bytes += (uint32_t)data_size;
+						//printf("[DaybreakConnection::ProcessDecodedPacket] Fragment seq=%u progress: %u/%u bytes\n", 
+						//	sequence, stream->fragment_current_bytes, stream->fragment_total_bytes);
 
 						if (stream->fragment_current_bytes >= stream->fragment_total_bytes) {
+							//printf("[DaybreakConnection::ProcessDecodedPacket] Fragment complete! Total size=%u, about to process reassembled packet\n", 
+							//	stream->fragment_total_bytes);
+							
+							// Resize to exact size in case we overallocated
+							stream->fragment_packet.Resize(stream->fragment_current_bytes);
+							
 							ProcessDecodedPacket(stream->fragment_packet);
 							stream->fragment_packet.Clear();
 							stream->fragment_total_bytes = 0;
@@ -807,6 +919,7 @@ void EQ::Net::DaybreakConnection::ProcessDecodedPacket(const Packet &p)
 
 			case OP_Padding:
 			{
+				//printf("[DaybreakConnection::ProcessDecodedPacket] OP_Padding packet, delivering to callback\n");
 				auto self = m_self.lock();
 				if (m_owner->m_on_packet_recv && self) {
 					m_owner->m_on_packet_recv(self, StaticPacket((char*)p.Data() + 1, p.Length() - 1));
@@ -851,9 +964,13 @@ void EQ::Net::DaybreakConnection::ProcessDecodedPacket(const Packet &p)
 		}
 	}
 	else {
+		//printf("[DaybreakConnection::ProcessDecodedPacket] Application packet (first_byte != 0), delivering to callback\n");
 		auto self = m_self.lock();
 		if (m_owner->m_on_packet_recv && self) {
+			//printf("[DaybreakConnection::ProcessDecodedPacket] Callback is set, delivering packet\n");
 			m_owner->m_on_packet_recv(self, p);
+		} else {
+			//printf("[DaybreakConnection::ProcessDecodedPacket] WARNING: No callback set or self is null\n");
 		}
 	}
 }
@@ -913,6 +1030,8 @@ void EQ::Net::DaybreakConnection::AppendCRC(Packet &p)
 
 void EQ::Net::DaybreakConnection::ChangeStatus(DbProtocolStatus new_status)
 {
+	//printf("[DaybreakConnection::ChangeStatus] Status changing from %d to %d\n", m_status, new_status);
+
 	if (m_owner->m_on_connection_state_change) {
 		if (auto self = m_self.lock()) {
 			m_owner->m_on_connection_state_change(self, m_status, new_status);
@@ -1287,6 +1406,7 @@ void EQ::Net::DaybreakConnection::UpdateDataBudget(double budget_add)
 
 void EQ::Net::DaybreakConnection::SendAck(int stream_id, uint16_t seq)
 {
+	//printf("[DaybreakConnection::SendAck] Sending ACK for stream %d, seq=%u\n", stream_id, seq);
 	DaybreakReliableHeader ack;
 	ack.zero = 0;
 	ack.opcode = OP_Ack + stream_id;
@@ -1324,7 +1444,11 @@ void EQ::Net::DaybreakConnection::SendDisconnect()
 
 void EQ::Net::DaybreakConnection::InternalBufferedSend(Packet &p)
 {
+	//printf("[DaybreakConnection::InternalBufferedSend] Buffering packet, length=%zu\n", p.Length());
+	
 	if (p.Length() > 0xFFU) {
+		// Packet too large to combine, send directly
+		//printf("[DaybreakConnection::InternalBufferedSend] Packet too large for buffering (%zu > 255), sending directly\n", p.Length());
 		FlushBuffer();
 		InternalSend(p);
 		return;
@@ -1341,13 +1465,19 @@ void EQ::Net::DaybreakConnection::InternalBufferedSend(Packet &p)
 	m_buffered_packets.push_back(copy);
 	m_buffered_packets_length += p.Length();
 
+	//printf("[DaybreakConnection::InternalBufferedSend] Buffer now has %zu packets, %zu bytes\n", 
+	//	m_buffered_packets.size(), m_buffered_packets_length);
+
 	if (m_buffered_packets_length + m_buffered_packets.size() > m_owner->m_options.hold_size) {
+		//printf("[DaybreakConnection::InternalBufferedSend] Buffer full, flushing\n");
 		FlushBuffer();
 	}
 }
 
 void EQ::Net::DaybreakConnection::SendConnect()
 {
+	//printf("[DaybreakConnection::SendConnect] Sending session request with connect_code=%u\n", m_connect_code);
+
 	DaybreakConnect connect;
 	connect.zero = 0;
 	connect.opcode = OP_SessionRequest;
@@ -1389,6 +1519,9 @@ void EQ::Net::DaybreakConnection::InternalSend(Packet &p) {
 	auto pooled_opt = send_buffer_pool.acquire();
 	if (!pooled_opt) {
 		m_stats.dropped_datarate_packets++;
+		if (m_owner->m_on_error_message) {
+			m_owner->m_on_error_message("Failed to acquire send buffer from pool - pool exhausted");
+		}
 		return;
 	}
 
@@ -1427,9 +1560,28 @@ void EQ::Net::DaybreakConnection::InternalSend(Packet &p) {
 		}
 
 		AppendCRC(out);
+		
+		// Bounds check before copying to send buffer
+		if (out.Length() > UDP_BUFFER_SIZE) {
+			if (m_owner->m_on_error_message) {
+				m_owner->m_on_error_message(fmt::format("Packet too large for send buffer: {} > {}", out.Length(), UDP_BUFFER_SIZE));
+			}
+			send_buffer_pool.release(ctx);
+			return;
+		}
+		
 		memcpy(data, out.Data(), out.Length());
 		send_buffers[0] = uv_buf_init(data, out.Length());
 	} else {
+		// Bounds check before copying to send buffer
+		if (p.Length() > UDP_BUFFER_SIZE) {
+			if (m_owner->m_on_error_message) {
+				m_owner->m_on_error_message(fmt::format("Packet too large for send buffer: {} > {}", p.Length(), UDP_BUFFER_SIZE));
+			}
+			send_buffer_pool.release(ctx);
+			return;
+		}
+		
 		memcpy(data, p.Data(), p.Length());
 		send_buffers[0] = uv_buf_init(data, p.Length());
 	}
@@ -1570,28 +1722,64 @@ void EQ::Net::DaybreakConnection::InternalQueuePacket(Packet &p, int stream_id, 
 
 void EQ::Net::DaybreakConnection::FlushBuffer()
 {
+	// //printf("[DaybreakConnection::FlushBuffer] Called, buffer has %zu packets\n", m_buffered_packets.size());
+	
 	if (m_buffered_packets.empty()) {
 		return;
 	}
 
-	if (m_buffered_packets.size() > 1) {
-		StaticPacket out(m_combined.get(), 512);
-		size_t length = 2;
-		for (auto &p : m_buffered_packets) {
-			out.PutUInt8(length, (uint8_t)p.Length());
-			out.PutPacket(length + 1, p);
-			length += (1 + p.Length());
+	// Send packets in chunks that fit within 512 bytes
+	while (!m_buffered_packets.empty()) {
+		if (m_buffered_packets.size() == 1) {
+			// Single packet - send directly
+			// //printf("[DaybreakConnection::FlushBuffer] Sending single packet\n");
+			auto &front = m_buffered_packets.front();
+			InternalSend(front);
+			m_buffered_packets.pop_front();
 		}
-
-		out.Resize(length);
-		InternalSend(out);
+		else {
+			// Multiple packets - combine as many as will fit in 512 bytes
+			// //printf("[DaybreakConnection::FlushBuffer] Combining packets (remaining: %zu)\n", m_buffered_packets.size());
+			StaticPacket out(m_combined.get(), 512);
+			out.PutUInt8(0, 0);
+			out.PutUInt8(1, OP_Combined);
+			size_t length = 2;
+			
+			auto it = m_buffered_packets.begin();
+			int combined_count = 0;
+			while (it != m_buffered_packets.end()) {
+				// Check if this packet would fit
+				if (length + 1 + it->Length() > 512) {
+					// Would exceed buffer - stop here
+					if (combined_count == 0) {
+						// This single packet is too large for combined format
+						// Send it individually
+						// //printf("[DaybreakConnection::FlushBuffer] Packet too large for combined format, sending individually\n");
+						InternalSend(*it);
+						it = m_buffered_packets.erase(it);
+						continue;
+					}
+					break;
+				}
+				
+				// Add packet to combined buffer
+				out.PutUInt8(length, (uint8_t)it->Length());
+				out.PutPacket(length + 1, *it);
+				length += (1 + it->Length());
+				combined_count++;
+				it = m_buffered_packets.erase(it);
+			}
+			
+			if (combined_count > 0) {
+				// Send the combined packet
+				out.Resize(length);
+				// //printf("[DaybreakConnection::FlushBuffer] Sending combined packet with %d packets, %zu bytes\n", 
+				// 	combined_count, length);
+				InternalSend(out);
+			}
+		}
 	}
-	else {
-		auto &front = m_buffered_packets.front();
-		InternalSend(front);
-	}
 
-	m_buffered_packets.clear();
 	m_buffered_packets_length = 0;
 }
 

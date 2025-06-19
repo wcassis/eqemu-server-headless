@@ -46,6 +46,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 #include "../common/repositories/player_event_logs_repository.h"
 #include "../common/events/player_event_logs.h"
 #include "../common/patches/patches.h"
+#include "../zone/data_bucket.h"
 #include "../common/repositories/guild_tributes_repository.h"
 #include "../common/skill_caps.h"
 #include "../common/server_reload_types.h"
@@ -1840,6 +1841,9 @@ void ZoneServer::TriggerBootup(uint32 in_zone_id, uint32 in_instance_id, const c
 }
 
 void ZoneServer::IncomingClient(Client* client) {
+	LogInfo("[DEBUG] ZoneServer::IncomingClient: Processing incoming client [{}] (charid: {}, accid: {}) for zone_id [{}], instance_id [{}]", 
+		client->GetCharName(), client->GetCharID(), client->GetAccountID(), GetZoneID(), GetInstanceID());
+
 	is_booting_up = true;
 	auto pack = new ServerPacket(ServerOP_ZoneIncClient, sizeof(ServerZoneIncomingClient_Struct));
 	auto s = (ServerZoneIncomingClient_Struct*) pack->pBuffer;
@@ -1858,6 +1862,10 @@ void ZoneServer::IncomingClient(Client* client) {
 
 	strn0cpy(s->charname, client->GetCharName(), sizeof(s->charname));
 	strn0cpy(s->lskey, client->GetLSKey(), sizeof(s->lskey));
+	
+	LogInfo("[DEBUG] ZoneServer::IncomingClient: Sending ServerOP_ZoneIncClient with charid [{}], charname [{}], accid [{}] to zone server", 
+		s->charid, s->charname, s->accid);
+	
 	SendPacket(pack);
 	delete pack;
 }

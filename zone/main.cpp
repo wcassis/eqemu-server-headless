@@ -597,6 +597,7 @@ int main(int argc, char **argv)
 			in.s_addr = eqsi->GetRemoteIP();
 			LogInfo("New client from [{}]:[{}]", inet_ntoa(in), ntohs(eqsi->GetRemotePort()));
 			auto client = new Client(eqsi);
+			LogInfo("[DEBUG] Created new Client object at address [0x{:x}]", (uintptr_t)client);
 			entity_list.AddClient(client);
 		}
 
